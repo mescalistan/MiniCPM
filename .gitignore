@@ -18,6 +18,7 @@ finetune/output/
 *.pt
 *.pth
 *.ckpt
+*.dat
 
 # Strumenti di quantizzazione e binari locali
 llama.cpp/

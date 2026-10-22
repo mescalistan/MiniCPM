@@ -2,6 +2,7 @@
 """
 Script per il merge degli adattatori LoRA nel modello base MiniCPM-2B (FP16).
 Genera una cartella modello standalone Hugging Face pronta per la conversione in GGUF.
+Preserva rigorosamente il tying di lm_head.weight <-> model.embed_tokens.weight.
 """
 
 import os
@@ -44,6 +45,13 @@ def merge_and_export(base_model_path: str, lora_adapter_path: str, output_path: 
 
     print("\n4. Esecuzione del merge dei pesi (merge_and_unload)...")
     merged_model = peft_model.merge_and_unload()
+    
+    # Rigoroso weight-tying per MiniCPM-2B LlamaForCausalLM
+    print("--> Sincronizzazione esplicita di lm_head.weight con model.embed_tokens.weight...")
+    merged_model.config.tie_word_embeddings = True
+    merged_model.lm_head.weight.data.copy_(merged_model.model.embed_tokens.weight.data)
+    merged_model.tie_weights()
+
     merged_model.eval()
 
     print(f"\n5. Salvataggio del modello esportato in: {output_path}")
@@ -74,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="output/MiniCPM-2B-Merged-FP16",
+        default="output/MiniCPM-2B-HighDensity-FP16",
         help="Percorso dove salvare il modello standalone FP16"
     )
     parser.add_argument(

@@ -1,26 +1,26 @@
 services:
   llama-server:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: minicpm-llama-server:n100-vnni
     container_name: minicpm2b-n100
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
-      # Monta la cartella locale dei modelli all'interno del container
-      - ./models:/models:ro
-    cpus: "3.2"
-    mem_limit: 2800m
-    # Passthrough memoria bloccata per consentire --load-mode mlock senza memory swap
+      - /home/gabibbo/minicpm/models:/models:ro
+    cpus: "3.6"
+    mem_limit: 3500m
+    cap_add:
+      - IPC_LOCK
     ulimits:
       memlock:
         soft: -1
         hard: -1
     ipc: host
     command: >
-      -m /models/minicpm-2b-q4_k_m.gguf
+      -m /models/minicpm-2b-q4_0-imatrix.gguf
       --alias minicpm-2b,minicpm,minicpm-custom
-      -t 3
-      --threads-batch 3
+      -t 4
+      --threads-batch 4
       -c 2048
       -b 512
       -ub 256
@@ -34,6 +34,10 @@ services:
       --jinja
       --host 0.0.0.0
       --port 8080
+      --spec-type ngram-simple
+      --spec-ngram-simple-size-n 3
+      --spec-ngram-simple-size-m 5
+      --prio 2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s

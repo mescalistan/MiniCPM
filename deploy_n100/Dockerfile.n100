@@ -1,0 +1,46 @@
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    libgomp1 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .
+
+RUN cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGGML_NATIVE=ON \
+    -DGGML_AVX2=ON \
+    -DGGML_AVX_VNNI=ON \
+    -DGGML_FMA=ON \
+    -DGGML_F16C=ON \
+    -DGGML_BMI2=ON \
+    -DGGML_BUILD_TESTS=OFF \
+    -DGGML_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_SERVER=ON \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DCMAKE_C_FLAGS="-O3 -march=alderlake -mtune=alderlake -mavx2 -mavxvnni" \
+    -DCMAKE_CXX_FLAGS="-O3 -march=alderlake -mtune=alderlake -mavx2 -mavxvnni"
+
+RUN cmake --build build --config Release -j 4 --target llama-server
+
+FROM ubuntu:24.04 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/build/bin/llama-server /app/llama-server
+
+EXPOSE 8080
+ENTRYPOINT ["/app/llama-server"]
