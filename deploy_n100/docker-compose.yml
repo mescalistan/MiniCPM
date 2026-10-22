@@ -11,13 +11,14 @@ services:
     mem_limit: 3500m
     cap_add:
       - IPC_LOCK
+      - SYS_NICE
     ulimits:
       memlock:
         soft: -1
         hard: -1
     ipc: host
     command: >
-      -m /models/minicpm-2b-q4_0-imatrix.gguf
+      -m /models/minicpm-2b-github-q4_0.gguf
       --alias minicpm-2b,minicpm,minicpm-custom
       -t 4
       --threads-batch 4

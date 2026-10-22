@@ -77,7 +77,7 @@ if (-not (Test-Path $QuantizeExe)) {
 if (-not (Test-Path $ModelPath)) {
     Write-Host "ATTENZIONE: Percorso $ModelPath non trovato." -ForegroundColor Yellow
     Write-Host "Utilizzo fallback sul checkpoint pre-convertito di Hugging Face (llama-format)..." -ForegroundColor Yellow
-    $ModelPath = "openbmb/MiniCPM-2B-dpo-bf16-llama-format"
+    $ModelPath = "openbmb/MiniCPM-2B-dpo-fp16"
 }
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null

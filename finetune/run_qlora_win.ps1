@@ -9,7 +9,7 @@ Write-Host "Output Dir: $OutputDir" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 .\.venv\Scripts\python.exe finetune/train_qlora_win.py `
-    --model_name_or_path "openbmb/MiniCPM-2B-dpo-bf16-llama-format" `
+    --model_name_or_path "openbmb/MiniCPM-2B-dpo-fp16" `
     --output_dir $OutputDir `
     --train_data_path "finetune/data/train_github.json" `
     --eval_data_path "finetune/data/eval_github.json" `

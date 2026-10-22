@@ -70,8 +70,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_model",
         type=str,
-        default="openbmb/MiniCPM-2B-dpo-bf16-llama-format",
-        help="Path o HuggingFace ID del modello base"
+        default="openbmb/MiniCPM-2B-dpo-fp16",
+        help="Path o HuggingFace ID del modello base (default: openbmb/MiniCPM-2B-dpo-fp16)"
     )
     parser.add_argument(
         "--lora_adapter",

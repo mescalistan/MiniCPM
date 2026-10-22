@@ -34,27 +34,27 @@ from peft import (
 @dataclass
 class ModelArguments:
     model_name_or_path: str = field(
-        default="openbmb/MiniCPM-2B-dpo-bf16-llama-format",
-        metadata={"help": "Path locale o ID Hugging Face del modello base (preferibile llama-format per conversione GGUF)."}
+        default="openbmb/MiniCPM-2B-dpo-fp16",
+        metadata={"help": "Path locale o ID Hugging Face del modello base ufficiale (MiniCPM-2B-dpo-fp16)."}
     )
 
 
 @dataclass
 class DataArguments:
     train_data_path: str = field(
-        default="finetune/data/AdvertiseGenChatML/train.json",
-        metadata={"help": "Percorso del file JSON di training (formato ChatML)."}
+        default="finetune/data/train_github.json",
+        metadata={"help": "Percorso del file JSON di training (formato ChatML/MiniCPM)."}
     )
     eval_data_path: Optional[str] = field(
-        default="finetune/data/AdvertiseGenChatML/dev.json",
-        metadata={"help": "Percorso del file JSON di validazione (opzionale)."}
+        default="finetune/data/eval_github.json",
+        metadata={"help": "Percorso del file JSON di validazione."}
     )
 
 
 @dataclass
 class CustomTrainingArguments(TrainingArguments):
     model_max_length: int = field(
-        default=1024,
+        default=512,
         metadata={"help": "Lunghezza massima della sequenza (troncamento/padding)."}
     )
     lora_r: int = field(default=16, metadata={"help": "Rank LoRA."})
@@ -64,11 +64,11 @@ class CustomTrainingArguments(TrainingArguments):
 
 class ChatMLDataset(Dataset):
     """
-    Dataset per Fine-Tuning supervisionato in formato ChatML.
-    Calcola la loss unicamente sui token generati dall'assistente,
-    mascherando i token dell'utente e di sistema con -100.
+    Dataset supervisionato ottimizzato per la sintassi nativa di MiniCPM:
+    <用户>[system_prompt\n\n]user_query<AI>assistant_response</s>
+    Calcola la loss unicamente sui token dell'assistente e sul token finale </s> (-100 sul resto).
     """
-    def __init__(self, data_path: str, tokenizer, model_max_length: int = 1024):
+    def __init__(self, data_path: str, tokenizer, model_max_length: int = 512):
         super().__init__()
         with open(data_path, "r", encoding="utf-8") as f:
             self.data = json.load(f)
@@ -81,29 +81,39 @@ class ChatMLDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         example = self.data[idx]
-        bos_id = self.tokenizer.bos_token_id or self.tokenizer.convert_tokens_to_ids("<s>")
-        eos_id = self.tokenizer.eos_token_id or self.tokenizer.convert_tokens_to_ids("</s>")
+        messages = example.get("messages", [])
 
-        input_ids = [bos_id] if bos_id is not None else []
-        labels = [self.ignore_index] * len(input_ids)
+        system_content = ""
+        user_content = ""
+        assistant_content = ""
 
-        for message in example.get("messages", []):
-            role = message["role"]
-            content = message["content"]
+        for m in messages:
+            role = m.get("role", "")
+            if role == "system":
+                system_content = m.get("content", "").strip()
+            elif role == "user":
+                user_content = m.get("content", "").strip()
+            elif role == "assistant":
+                assistant_content = m.get("content", "").strip()
 
-            if hasattr(self.tokenizer, "apply_chat_template"):
-                msg_ids = self.tokenizer.apply_chat_template([message], tokenize=True, add_generation_prompt=False)
-                if bos_id is not None and len(msg_ids) > 0 and msg_ids[0] == bos_id:
-                    msg_ids = msg_ids[1:]
-            else:
-                formatted_text = f"<|im_start|>{role}\n{content}<|im_end|>\n"
-                msg_ids = self.tokenizer.encode(formatted_text, add_special_tokens=False)
+        # Costruzione del prompt nativo MiniCPM
+        if system_content:
+            prompt_text = f"<用户>{system_content}\n\n{user_content}<AI>"
+        else:
+            prompt_text = f"<用户>{user_content}<AI>"
 
-            input_ids += msg_ids
-            if role == "assistant":
-                labels += msg_ids
-            else:
-                labels += [self.ignore_index] * len(msg_ids)
+        resp_text = f"{assistant_content}</s>"
+
+        prompt_ids = self.tokenizer.encode(prompt_text, add_special_tokens=True)
+        resp_ids = self.tokenizer.encode(resp_text, add_special_tokens=False)
+
+        # Se resp_ids non termina con eos_id, lo aggiungiamo
+        eos_id = self.tokenizer.eos_token_id or 2
+        if len(resp_ids) == 0 or resp_ids[-1] != eos_id:
+            resp_ids.append(eos_id)
+
+        input_ids = prompt_ids + resp_ids
+        labels = [self.ignore_index] * len(prompt_ids) + resp_ids
 
         # Troncamento alla lunghezza massima
         input_ids = input_ids[:self.model_max_length]
