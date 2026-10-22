@@ -1,0 +1,16 @@
+{
+  "name": "ai-soc-app-c3po-modules",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Moduli C-3PO per ai-soc-app (HOME-SERVER). Solo per i test locali: sul server le dipendenze stanno nel package.json di ai-soc-app.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "pdfkit": "^0.16.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

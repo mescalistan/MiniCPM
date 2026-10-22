@@ -10,8 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Fissa la revisione di llama.cpp: con un clone di master ogni rebuild puo'
+# cambiare flag, default (es. --cache-ram) e comportamento del template.
+#   docker build --build-arg LLAMA_CPP_REF=<tag-o-commit> ...
+ARG LLAMA_CPP_REF=master
 WORKDIR /app
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .
+RUN git clone https://github.com/ggml-org/llama.cpp.git . && git checkout "$LLAMA_CPP_REF"
 
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \

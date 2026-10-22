@@ -5,13 +5,14 @@ Caratteristiche:
 - Quantizzazione 4-bit NF4 con BitsAndBytes (VRAM < 5 GB)
 - Targeting di tutti i moduli lineari (q, k, v, o, gate, up, down)
 - Precisione di calcolo FP16 ottimale per Tensor Core Turing (sm_75)
-- Supporto dataset formato ChatML con mascheramento prompt utente
+- Formato MiniCPM nativo (<用户>/<AI>) identico al template di llama-server, anche multi-turno
+- Loss solo sui token delle risposte (maschera sugli offset dei caratteri)
 """
 
 import os
 import json
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 import torch
 from torch.utils.data import Dataset
@@ -62,66 +63,88 @@ class CustomTrainingArguments(TrainingArguments):
     lora_dropout: float = field(default=0.05, metadata={"help": "Dropout LoRA."})
 
 
+def render_minicpm(messages: List[Dict]) -> Tuple[str, List[Tuple[int, int]]]:
+    """
+    Testo identico a deploy_n100/minicpm-chat.jinja (senza BOS, lo aggiunge il tokenizer):
+        <用户>{system}\n\n{user}<AI>{assistant}</s><用户>{user}<AI>{assistant}</s>
+    Restituisce il testo e gli intervalli di caratteri (inizio, fine) di ogni
+    risposta dell'assistente, </s> compreso: sono gli unici token con loss.
+    """
+    text = ""
+    spans = []
+    pending_system = ""
+    for m in messages:
+        role = m.get("role", "")
+        content = (m.get("content") or "").strip()
+        if role == "system":
+            pending_system += content
+        elif role == "user":
+            text += "<用户>"
+            if pending_system:
+                text += pending_system + "\n\n"
+                pending_system = ""
+            text += content + "<AI>"
+        elif role == "assistant":
+            start = len(text)
+            text += content + "</s>"
+            spans.append((start, len(text)))
+    return text, spans
+
+
 class ChatMLDataset(Dataset):
     """
-    Dataset supervisionato ottimizzato per la sintassi nativa di MiniCPM:
-    <用户>[system_prompt\n\n]user_query<AI>assistant_response</s>
-    Calcola la loss unicamente sui token dell'assistente e sul token finale </s> (-100 sul resto).
+    Dataset supervisionato nel formato nativo di MiniCPM, anche multi-turno.
+    La loss e' calcolata solo sui token delle risposte (e sui </s> finali).
+    Gli esempi piu' lunghi di model_max_length vengono scartati: troncarli
+    toglierebbe proprio la risposta, cioe' l'unica parte che addestra.
     """
     def __init__(self, data_path: str, tokenizer, model_max_length: int = 512):
         super().__init__()
         with open(data_path, "r", encoding="utf-8") as f:
-            self.data = json.load(f)
+            raw = json.load(f)
         self.tokenizer = tokenizer
         self.model_max_length = model_max_length
         self.ignore_index = -100
+        if not getattr(tokenizer, "is_fast", False):
+            raise ValueError("Serve un tokenizer 'fast' (offset mapping) per mascherare le label sui caratteri.")
+
+        self.examples = []
+        dropped = 0
+        for ex in raw:
+            item = self.encode(ex.get("messages", []))
+            if item is None:
+                dropped += 1
+            else:
+                self.examples.append(item)
+        print(f"    {data_path}: {len(self.examples)} esempi, {dropped} scartati (oltre {model_max_length} token o senza risposta)")
+
+    def encode(self, messages: List[Dict]):
+        text, spans = render_minicpm(messages)
+        if not spans:
+            return None
+        enc = self.tokenizer(text, add_special_tokens=True, return_offsets_mapping=True)
+        input_ids = enc["input_ids"]
+        if len(input_ids) > self.model_max_length:
+            return None
+        labels = []
+        for tok_id, (s, e) in zip(input_ids, enc["offset_mapping"]):
+            inside = e > s and any(s >= a and e <= b for a, b in spans)
+            labels.append(tok_id if inside else self.ignore_index)
+        if all(l == self.ignore_index for l in labels):
+            return None
+        return input_ids, labels
 
     def __len__(self):
-        return len(self.data)
+        return len(self.examples)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        example = self.data[idx]
-        messages = example.get("messages", [])
-
-        system_content = ""
-        user_content = ""
-        assistant_content = ""
-
-        for m in messages:
-            role = m.get("role", "")
-            if role == "system":
-                system_content = m.get("content", "").strip()
-            elif role == "user":
-                user_content = m.get("content", "").strip()
-            elif role == "assistant":
-                assistant_content = m.get("content", "").strip()
-
-        # Costruzione del prompt nativo MiniCPM
-        if system_content:
-            prompt_text = f"<用户>{system_content}\n\n{user_content}<AI>"
-        else:
-            prompt_text = f"<用户>{user_content}<AI>"
-
-        resp_text = f"{assistant_content}</s>"
-
-        prompt_ids = self.tokenizer.encode(prompt_text, add_special_tokens=True)
-        resp_ids = self.tokenizer.encode(resp_text, add_special_tokens=False)
-
-        # Se resp_ids non termina con eos_id, lo aggiungiamo
-        eos_id = self.tokenizer.eos_token_id or 2
-        if len(resp_ids) == 0 or resp_ids[-1] != eos_id:
-            resp_ids.append(eos_id)
-
-        input_ids = prompt_ids + resp_ids
-        labels = [self.ignore_index] * len(prompt_ids) + resp_ids
-
-        # Troncamento alla lunghezza massima
-        input_ids = input_ids[:self.model_max_length]
-        labels = labels[:self.model_max_length]
+        input_ids, labels = self.examples[idx]
+        input_ids, labels = list(input_ids), list(labels)
         attention_mask = [1] * len(input_ids)
 
         # Padding a model_max_length
         pad_len = self.model_max_length - len(input_ids)
+        eos_id = self.tokenizer.eos_token_id or 2
         pad_token_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else eos_id
         input_ids += [pad_token_id] * pad_len
         labels += [self.ignore_index] * pad_len

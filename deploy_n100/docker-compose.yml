@@ -7,8 +7,16 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - /home/gabibbo/minicpm/models:/models:ro
-    cpus: "3.6"
-    mem_limit: 3500m
+      # Template di chat identico al formato di training (vedi il file).
+      - ./minicpm-chat.jinja:/config/minicpm-chat.jinja:ro
+    # Niente quota `cpus:`: ggml sincronizza i thread con barriere in
+    # busy-wait e il throttling CFS di una quota frazionaria (3.6) blocca
+    # l'intero step a ogni periodo di 100 ms. La precedenza sugli altri
+    # container la danno --prio 2 e cpu_shares.
+    cpu_shares: 2048
+    # Modello Q4_K_M ~1.8 GB + KV F16 4096 tok (~1.4 GB) + buffer di calcolo
+    # (~0.3 GB) + cache dei prompt in RAM (384 MB) = ~3.9 GB.
+    mem_limit: 4608m
     cap_add:
       - IPC_LOCK
       - SYS_NICE
@@ -17,29 +25,56 @@ services:
         soft: -1
         hard: -1
     ipc: host
+    # Note sui flag:
+    # -t 3 / -tb 4     la generazione e' limitata dalla banda RAM e 3 thread la
+    #                  saturano gia'; il quarto core resta a Node/nginx. Il
+    #                  prefill e' compute-bound e usa tutti e 4 i core.
+    # -c 4096 -np 2    due slot da 2048 token: chat-app e ai-soc-app non si
+    #                  rubano la cache dei prompt a vicenda.
+    # KV cache F16     niente -ctk/-ctv q8_0: con 12 GB liberi da Ollama non
+    #                  serve risparmiare 0.7 GB, e si elimina una variabile.
+    # --cache-ram 384  il default e' 8192 MiB: la cache dei prompt cresce
+    #                  oltre mem_limit e il kernel uccide il container.
+    # --cache-reuse 64 riusa i blocchi di KV gia' calcolati (system prompt
+    #                  statici) anche quando la parte finale del prompt cambia.
+    # Penalita'        presence/frequency a 0 lato server; repeat_penalty e
+    #                  min_p arrivano per richiesta dal client Node.
+    # Nessun --spec-type: lo speculative ngram su un 2B in CPU non accelera e
+    #                  peggiora l'accettazione su testo italiano.
+    # MINICPM_MODEL in deploy_n100/.env (lo scrive post_train_multitask.py --deploy)
     command: >
-      -m /models/minicpm-2b-q4_k_m.gguf
+      -m /models/${MINICPM_MODEL:-minicpm-2b-q4_k_m.gguf}
       --alias minicpm-2b,minicpm,minicpm-custom
       -t 3
-      --threads-batch 3
+      --threads-batch 4
       -c 4096
+      -np 2
       -b 512
       -ub 256
-      -np 2
-      --cache-reuse 64
       -fa on
+      --cache-reuse 64
+      --cache-ram 384
       --load-mode mlock
-      --min-p 0.05
       --jinja
+      --chat-template-file /config/minicpm-chat.jinja
+      --temp 0.4
+      --top-k 40
+      --top-p 0.8
+      --min-p 0.05
+      --repeat-penalty 1.05
+      --repeat-last-n 128
+      --presence-penalty 0
+      --frequency-penalty 0
       --host 0.0.0.0
       --port 8080
       --prio 2
+      --metrics
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
     networks:
       - home-server_local-net
 

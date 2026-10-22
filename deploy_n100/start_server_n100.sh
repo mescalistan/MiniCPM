@@ -45,23 +45,35 @@ fi
 
 echo "Modello:    $MODEL"
 echo "Porta:      $PORT"
-echo "Threads:    4 (Core Fisici E-Cores N100)"
+echo "Threads:    3 gen / 4 prefill (E-core N100)"
 echo "MemLock:    Attivo (Zero paging su swap)"
 echo "Endpoint:   http://localhost:$PORT/v1/chat/completions"
 echo "=========================================================="
 echo ""
 
-# Esegui con i parametri ottimizzati per Intel N100
+# Stessi parametri del container minicpm2b-n100 (vedi docker-compose.yml)
 exec "$SERVER_BIN" \
     -m "$MODEL" \
-    -t 4 \
+    -t 3 \
     --threads-batch 4 \
-    -c 2048 \
+    -c 4096 \
+    -np 2 \
     -b 512 \
     -ub 256 \
-    --mlock \
-    --min-p 0.0 \
+    -fa on \
+    --cache-reuse 64 \
+    --cache-ram 384 \
+    --load-mode mlock \
     --jinja \
+    --chat-template-file "$SCRIPT_DIR/minicpm-chat.jinja" \
+    --temp 0.4 \
+    --top-k 40 \
+    --top-p 0.8 \
+    --min-p 0.05 \
+    --repeat-penalty 1.05 \
+    --repeat-last-n 128 \
+    --presence-penalty 0 \
+    --frequency-penalty 0 \
     --host "$HOST" \
     --port "$PORT" \
     "$@"

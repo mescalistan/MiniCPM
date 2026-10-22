@@ -1,0 +1,31 @@
+{#-
+  Template di chat per MiniCPM-2B allineato 1:1 al formato di training
+  (finetune/train_qlora_win.py):
+
+      <s><用户>{system}\n\n{user}<AI>{assistant}</s><用户>{user}<AI>
+
+  Il template incorporato nel GGUF (e quello built-in di llama.cpp) mette il
+  system FUORI dal turno <用户>, senza separatori: il modello non l'ha mai
+  visto in training e lo tratta come testo da continuare. Qui il system viene
+  fuso nel primo turno utente e ogni risposta dell'assistente si chiude con
+  </s>, cosi' i turni multipli restano separati.
+
+  Niente bos_token: llama-server lo aggiunge gia' (tokenizer.ggml.add_bos_token).
+-#}
+{%- set ns = namespace(sys='') -%}
+{%- for message in messages -%}
+  {%- if message['role'] == 'system' -%}
+    {%- set ns.sys = ns.sys + (message['content'] | trim) -%}
+  {%- elif message['role'] == 'user' -%}
+    {{- '<用户>' -}}
+    {%- if ns.sys -%}
+      {{- ns.sys + '\n\n' -}}
+      {%- set ns.sys = '' -%}
+    {%- endif -%}
+    {{- message['content'] | trim -}}
+    {{- '<AI>' -}}
+  {%- elif message['role'] == 'assistant' -%}
+    {{- message['content'] | trim -}}
+    {{- '</s>' -}}
+  {%- endif -%}
+{%- endfor -%}
