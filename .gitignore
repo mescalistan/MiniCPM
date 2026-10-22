@@ -1,13 +1,35 @@
 .*DS_Store
 *__pycache__*
 *.pyc
-finetune/output/*
-wip.*
-.idea
-venv
-.venv
+*.pyo
+*.pyd
+
+# Ambienti virtuali
+.venv/
+venv/
 .env
 
-# 雷达图数据源 + 渲染脚本 (产物 PNG 进 assets/, 不同步源)
+# Modelli e pesi pesanti
+output/
+finetune/output/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Strumenti di quantizzazione e binari locali
+llama.cpp/
+llama_bin/
+llama_cpu.zip
+
+# IDE e file temporanei
+.idea/
+.vscode/
+*.swp
+wip.*
+
+# Dati di benchmark e render
 榜单.csv
 scripts/
