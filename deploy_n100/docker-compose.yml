@@ -8,6 +8,8 @@ services:
     volumes:
       # Monta la cartella locale dei modelli all'interno del container
       - ./models:/models:ro
+    cpus: "3.2"
+    mem_limit: 2800m
     # Passthrough memoria bloccata per consentire --load-mode mlock senza memory swap
     ulimits:
       memlock:
@@ -16,15 +18,22 @@ services:
     ipc: host
     command: >
       -m /models/minicpm-2b-q4_k_m.gguf
-      -t 4
-      --threads-batch 4
+      --alias minicpm-2b,minicpm,minicpm-custom
+      -t 3
+      --threads-batch 3
       -c 2048
       -b 512
       -ub 256
       -np 1
+      --cache-reuse 64
+      -fa on
+      -ctk q8_0
+      -ctv q8_0
       --load-mode mlock
       --min-p 0.0
       --jinja
+      --host 0.0.0.0
+      --port 8080
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
