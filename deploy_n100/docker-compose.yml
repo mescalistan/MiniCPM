@@ -8,7 +8,7 @@ services:
     volumes:
       # Monta la cartella locale dei modelli all'interno del container
       - ./models:/models:ro
-    # Passthrough memoria bloccata per consentire --mlock senza memory swap
+    # Passthrough memoria bloccata per consentire --load-mode mlock senza memory swap
     ulimits:
       memlock:
         soft: -1
@@ -21,14 +21,19 @@ services:
       -c 2048
       -b 512
       -ub 256
-      --mlock
+      -np 1
+      --load-mode mlock
       --min-p 0.0
       --jinja
-      --host 0.0.0.0
-      --port 8080
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 10s
+    networks:
+      - home-server_local-net
+
+networks:
+  home-server_local-net:
+    external: true
